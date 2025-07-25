@@ -133,7 +133,7 @@ metadata:
 type: Opaque
 data:
   API_KEY: $(echo -n "$API_KEY" | base64) # Base64 encode the secret value
-EOF_UNSEALED # <--- THIS LINE IS NOW INDENTED BY EXACTLY 8 SPACES.
+EOF_UNSEALED # <--- THIS LINE IS NOW AT COLUMN 1 (NO INDENTATION).
 
           # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
