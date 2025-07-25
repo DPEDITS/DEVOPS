@@ -122,18 +122,18 @@ jobs:
           API_KEY: ${{ secrets.VITE_APP_API_KEY_VALUE }}
           SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
           NAMESPACE: default # Namespace where the secret will be deployed
-        run: |
+        run: | # The entire script below is part of this run block
           # Create a temporary unsealed secret YAML
-          cat <<EOF > /tmp/unsealed-secret.yaml
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: ${SECRET_NAME}
-            namespace: ${NAMESPACE}
-          type: Opaque
-          data:
-            API_KEY: $(echo -n "$API_KEY" | base64) # Base64 encode the secret value
-          EOF
+          cat <<'EOF_UNSEALED' > /tmp/unsealed-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${SECRET_NAME}
+  namespace: ${NAMESPACE}
+type: Opaque
+data:
+  API_KEY: $(echo -n "$API_KEY" | base64) # Base64 encode the secret value
+EOF_UNSEALED
 
           # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
@@ -158,30 +158,22 @@ jobs:
           echo "Port-forward established. Proceeding with sealing."
           # -----------------------------------------------------------
 
-          # --- NEW: Write kubeseal command to a script and execute it for robustness ---
-          # The SEAL_SCRIPT_EOF marker must be indented by exactly 8 spaces to align with 'run: |'.
-          cat << 'SEAL_SCRIPT_EOF' > /tmp/seal_secret.sh
-#!/bin/bash
-# Execute kubeseal with explicit arguments
-# Capture stderr and stdout for debugging
-kubeseal --format yaml \
-         --controller-url http://localhost:8080 \
-         --name "${SECRET_NAME}" \
-         --namespace "${NAMESPACE}" \
-         < /tmp/unsealed-secret.yaml \
-         > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_error.log
+          # --- Execute kubeseal command directly in this run block ---
+          # This avoids nesting 'cat << EOF' within another 'cat << EOF'
+          kubeseal --format yaml \
+                   --controller-url http://localhost:8080 \
+                   --name "${SECRET_NAME}" \
+                   --namespace "${NAMESPACE}" \
+                   < /tmp/unsealed-secret.yaml \
+                   > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_error.log
 
-# Check exit code and print logs if failed
-if [ $? -ne 0 ]; then
-  echo "ERROR: kubeseal command failed!"
-  echo "kubeseal stderr/stdout:"
-  cat /tmp/kubeseal_error.log
-  exit 1
-fi
-        SEAL_SCRIPT_EOF # <--- THIS LINE IS NOW INDENTED BY EXACTLY 8 SPACES.
-
-          chmod +x /tmp/seal_secret.sh
-          /tmp/seal_secret.sh # Execute the script
+          # Check exit code and print logs if failed
+          if [ $? -ne 0 ]; then
+            echo "ERROR: kubeseal command failed!"
+            echo "kubeseal stderr/stdout:"
+            cat /tmp/kubeseal_error.log
+            exit 1
+          fi
           # -----------------------------------------------------------------------------
 
           echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
