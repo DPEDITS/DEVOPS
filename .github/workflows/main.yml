@@ -145,7 +145,7 @@ jobs:
           printf "data:\n" >> /tmp/unsealed-secret.yaml
           printf "  API_KEY: %s\n" "${ENCODED_API_KEY}" >> /tmp/unsealed-secret.yaml
 
-          # --- Port-forward sealed-secrets-controller ---
+          # Port-forward sealed-secrets-controller
           echo "Attempting to port-forward sealed-secrets controller..."
           # Get service details for debugging
           kubectl get service sealed-secrets -n kube-system -o yaml || true
@@ -172,7 +172,7 @@ jobs:
             exit 1
           fi
           echo "Port-forward established. Proceeding with sealing."
-          # -----------------------------------------------------------
+          # End Port-forward sealed-secrets-controller section
 
           # Execute kubeseal command using the temporary file
           # Add -v (verbose) flag and redirect all output to a log file for debugging
@@ -181,7 +181,7 @@ jobs:
                    --controller-url http://localhost:8080 \
                    --name "${SECRET_NAME}" \
                    --namespace "${NAMESPACE}" \
-                   -f /tmp/unsealed-secret.yaml \ # <--- Explicitly use -f for input file
+                   -f /tmp/unsealed-secret.yaml \
                    > k8s/vite-app-sealed-secret.yaml
 
           # Check exit code and print logs if failed
@@ -195,7 +195,7 @@ jobs:
 
           # Clean up the port-forward process
           kill $PORT_FORWARD_PID || true
-      # --- End Sealed Secrets Integration ---
+      # End Sealed Secrets Integration
 
       - name: Update deployment with new image tag
         run: |
