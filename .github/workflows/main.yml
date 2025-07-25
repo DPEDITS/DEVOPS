@@ -105,10 +105,10 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
-      - name: Install kubeseal
+- name: Install kubeseal
         run: |
-          KUBESEAL_VERSION="0.25.0" # Use a specific version
-          wget https://github.com/bitnami/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-linux-amd64 -O kubeseal
+          KUBESEAL_VERSION="0.30.0" # Updated to the latest version
+          wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64 -O kubeseal
           chmod +x kubeseal
           sudo mv kubeseal /usr/local/bin/kubeseal
           kubeseal --version
