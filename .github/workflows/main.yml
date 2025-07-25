@@ -105,7 +105,8 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
-- name: Install kubeseal
+      # --- FIX: This step was incorrectly indented ---
+      - name: Install kubeseal
         run: |
           KUBESEAL_VERSION="0.30.0" # Updated to the latest version
           wget https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64 -O kubeseal
@@ -138,7 +139,7 @@ jobs:
                    --controller-name sealed-secrets \
                    --controller-namespace kube-system \
                    < /tmp/unsealed-secret.yaml > k8s/vite-app-sealed-secret.yaml
-          
+
           echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
       # --- End Sealed Secrets Integration ---
 
