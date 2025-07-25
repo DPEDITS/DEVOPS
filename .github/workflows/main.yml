@@ -127,6 +127,9 @@ jobs:
           SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
           NAMESPACE: default # Namespace where the secret will be deployed
         run: |
+          # Enable shell debugging and exit on error
+          set -xe
+
           # Base64 encode the API_KEY
           ENCODED_API_KEY=$(echo -n "${API_KEY}" | base64)
 
@@ -143,6 +146,12 @@ jobs:
 
           # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
+          # Get service details for debugging
+          kubectl get service sealed-secrets -n kube-system -o yaml || true
+          kubectl describe service sealed-secrets -n kube-system || true
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets -o wide || true
+          kubectl describe pod $(kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets -o jsonpath='{.items[0].metadata.name}') -n kube-system || true
+
           kubectl port-forward service/sealed-secrets -n kube-system 8080:8080 > /tmp/port-forward.log 2>&1 &
           PORT_FORWARD_PID=$! # Capture the PID of the background process
 
@@ -166,19 +175,18 @@ jobs:
 
           # Execute kubeseal command using the temporary file
           # Add -v (verbose) flag and redirect all output to a log file for debugging
+          # Direct stderr to console output for immediate visibility
           kubeseal -v --format yaml \
                    --controller-url http://localhost:8080 \
                    --name "${SECRET_NAME}" \
                    --namespace "${NAMESPACE}" \
                    < /tmp/unsealed-secret.yaml \
-                   > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_debug.log # Redirect stderr to a separate debug log
+                   > k8s/vite-app-sealed-secret.yaml
 
           # Check exit code and print logs if failed
           if [ $? -ne 0 ]; then
             echo "ERROR: kubeseal command failed with exit code $?."
-            echo "--- kubeseal debug output ---"
-            cat /tmp/kubeseal_debug.log # Print the debug log
-            echo "-----------------------------"
+            # No need to cat kubeseal_debug.log here, as stderr is now direct
             exit 1
           fi
 
