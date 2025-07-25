@@ -159,7 +159,7 @@ jobs:
           # -----------------------------------------------------------
 
           # --- NEW: Write kubeseal command to a script and execute it for robustness ---
-          # The SEAL_SCRIPT_EOF marker must be indented by exactly 10 spaces to align with the 'run: |' content.
+          # The SEAL_SCRIPT_EOF marker must be unindented to the very first column.
           cat << 'SEAL_SCRIPT_EOF' > /tmp/seal_secret.sh
 #!/bin/bash
 # Execute kubeseal with explicit arguments
@@ -178,7 +178,7 @@ if [ $? -ne 0 ]; then
   cat /tmp/kubeseal_error.log
   exit 1
 fi
-          SEAL_SCRIPT_EOF # <--- THIS LINE IS NOW INDENTED BY 10 SPACES.
+SEAL_SCRIPT_EOF # <--- THIS LINE IS NOW AT COLUMN 1 (NO INDENTATION).
 
           chmod +x /tmp/seal_secret.sh
           /tmp/seal_secret.sh # Execute the script
