@@ -174,9 +174,21 @@ jobs:
           echo "Port-forward established. Proceeding with sealing."
           # End Port-forward sealed-secrets-controller section
 
-          # --- NEW: Execute kubeseal command on a single line ---
-          # This is the most direct and least error-prone way to call kubeseal.
-          kubeseal -v --format yaml --controller-url http://localhost:8080 --name "${SECRET_NAME}" --namespace "${NAMESPACE}" -f /tmp/unsealed-secret.yaml > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_debug.log
+          # --- NEW: Execute kubeseal command using a shell array for arguments ---
+          # This is the most robust way to pass arguments to a command in bash.
+          # It avoids issues with quoting, spaces, and special characters.
+          KUBESEAL_ARGS=(
+            "-v"
+            "--format" "yaml"
+            "--controller-url" "http://localhost:8080"
+            "--name" "${SECRET_NAME}"
+            "--namespace" "${NAMESPACE}"
+            "-f" "/tmp/unsealed-secret.yaml"
+          )
+
+          # Execute kubeseal, redirecting output and error
+          # Use "${KUBESEAL_ARGS[@]}" to expand the array correctly into separate arguments
+          kubeseal "${KUBESEAL_ARGS[@]}" > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_debug.log
 
           # Check exit code and print logs if failed
           if [ $? -ne 0 ]; then
