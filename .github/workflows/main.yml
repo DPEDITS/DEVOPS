@@ -9,7 +9,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: my-vite-app
-  EKS_CLUSTER_NAME: vite-app-cluster
+  EKS_CLUSTER_NAME: vite-app-cluster-v2
 
 jobs:
   security-scans:
