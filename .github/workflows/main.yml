@@ -159,9 +159,13 @@ jobs:
           # -----------------------------------------------------------
 
           # Seal the secret using kubeseal
-          # IMPORTANT: Use --controller-url to point kubeseal to the local port-forward
-          # Use a pipe for input instead of redirection for robustness
-          cat /tmp/unsealed-secret.yaml | kubeseal --format yaml --controller-url http://localhost:8080 > k8s/vite-app-sealed-secret.yaml
+          # IMPORTANT: Provide all necessary flags explicitly and on one line for robustness
+          # Added --name and --namespace flags explicitly, as they are often required/expected
+          kubeseal --format yaml \
+                   --controller-url http://localhost:8080 \
+                   --name "${SECRET_NAME}" \
+                   --namespace "${NAMESPACE}" \
+                   < /tmp/unsealed-secret.yaml > k8s/vite-app-sealed-secret.yaml
 
           echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
 
