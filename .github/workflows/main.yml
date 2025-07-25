@@ -136,16 +136,9 @@ jobs:
           # Define the unsealed secret YAML content by echoing line by line
           # This avoids here-document parsing issues in YAML.
           # Use printf for precise formatting and variable expansion.
-          printf "apiVersion: v1\n" > /tmp/unsealed-secret.yaml
-          printf "kind: Secret\n" >> /tmp/unsealed-secret.yaml
-          printf "metadata:\n" >> /tmp/unsealed-secret.yaml
-          printf "  name: %s\n" "${SECRET_NAME}" >> /tmp/unsealed-secret.yaml
-          printf "  namespace: %s\n" "${NAMESPACE}" >> /tmp/unsealed-secret.yaml
-          printf "type: Opaque\n" >> /tmp/unsealed-secret.yaml
-          printf "data:\n" >> /tmp/unsealed-secret.yaml
-          printf "  API_KEY: %s\n" "${ENCODED_API_KEY}" >> /tmp/unsealed-secret.yaml
+          UNSEALED_YAML_CONTENT=$(printf "apiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\n  namespace: %s\ntype: Opaque\ndata:\n  API_KEY: %s\n" "${SECRET_NAME}" "${NAMESPACE}" "${ENCODED_API_KEY}")
 
-          # --- Port-forward sealed-secrets-controller --- # Removed the leading '---' from this line
+          # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
           # Get service details for debugging
           kubectl get service sealed-secrets -n kube-system -o yaml || true
@@ -172,22 +165,23 @@ jobs:
             exit 1
           fi
           echo "Port-forward established. Proceeding with sealing."
-          # ----------------------------------------------------------- # Removed the leading '---' from this line
+          # -----------------------------------------------------------
 
-          # Execute kubeseal command using the temporary file
-          # Add -v (verbose) flag and redirect all output to a log file for debugging
-          # Direct stderr to console output for immediate visibility
+          # Execute kubeseal command by piping the YAML content directly
+          # This is the most robust way to provide input.
+          echo "${UNSEALED_YAML_CONTENT}" | \
           kubeseal -v --format yaml \
                    --controller-url http://localhost:8080 \
                    --name "${SECRET_NAME}" \
                    --namespace "${NAMESPACE}" \
-                   < /tmp/unsealed-secret.yaml \
-                   > k8s/vite-app-sealed-secret.yaml
+                   > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_debug.log # Redirect stderr to a separate debug log
 
           # Check exit code and print logs if failed
           if [ $? -ne 0 ]; then
             echo "ERROR: kubeseal command failed with exit code $?."
-            # No need to cat kubeseal_debug.log here, as stderr is now direct
+            echo "--- kubeseal debug output ---"
+            cat /tmp/kubeseal_debug.log # Print the debug log
+            echo "-----------------------------"
             exit 1
           fi
 
@@ -195,7 +189,7 @@ jobs:
 
           # Clean up the port-forward process
           kill $PORT_FORWARD_PID || true
-      # --- End Sealed Secrets Integration --- # Removed the leading '---' from this line
+      # --- End Sealed Secrets Integration ---
 
       - name: Update deployment with new image tag
         run: |
