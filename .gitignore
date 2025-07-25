@@ -1,0 +1,8 @@
+# Ignore everything in infra/
+infra/**
+
+
+# But don't ignore 
+
+!infra/main.tf
+!infra/variables.tf
