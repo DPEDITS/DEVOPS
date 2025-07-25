@@ -165,18 +165,20 @@ jobs:
           # -----------------------------------------------------------
 
           # Execute kubeseal command using the temporary file
-          kubeseal --format yaml \
+          # Add -v (verbose) flag and redirect all output to a log file for debugging
+          kubeseal -v --format yaml \
                    --controller-url http://localhost:8080 \
                    --name "${SECRET_NAME}" \
                    --namespace "${NAMESPACE}" \
                    < /tmp/unsealed-secret.yaml \
-                   > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_error.log
+                   > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_debug.log # Redirect stderr to a separate debug log
 
           # Check exit code and print logs if failed
           if [ $? -ne 0 ]; then
-            echo "ERROR: kubeseal command failed!"
-            echo "kubeseal stderr/stdout:"
-            cat /tmp/kubeseal_error.log
+            echo "ERROR: kubeseal command failed with exit code $?."
+            echo "--- kubeseal debug output ---"
+            cat /tmp/kubeseal_debug.log # Print the debug log
+            echo "-----------------------------"
             exit 1
           fi
 
