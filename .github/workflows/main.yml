@@ -145,7 +145,7 @@ jobs:
           printf "data:\n" >> /tmp/unsealed-secret.yaml
           printf "  API_KEY: %s\n" "${ENCODED_API_KEY}" >> /tmp/unsealed-secret.yaml
 
-          # Port-forward sealed-secrets-controller
+          # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
           # Get service details for debugging
           kubectl get service sealed-secrets -n kube-system -o yaml || true
@@ -174,22 +174,26 @@ jobs:
           echo "Port-forward established. Proceeding with sealing."
           # End Port-forward sealed-secrets-controller section
 
-          # Execute kubeseal command using the temporary file
-          # Add -v (verbose) flag and redirect all output to a log file for debugging
-          # Direct stderr to console output for immediate visibility
-          kubeseal -v --format yaml \
-                   --controller-url http://localhost:8080 \
-                   --name "${SECRET_NAME}" \
-                   --namespace "${NAMESPACE}" \
-                   -f /tmp/unsealed-secret.yaml \
-                   > k8s/vite-app-sealed-secret.yaml
+          # --- NEW: Construct and execute kubeseal command as a single string ---
+          # This avoids any parsing issues with pipes or redirections in the YAML run block.
+          KUBESEAL_CMD="kubeseal -v --format yaml \
+                        --controller-url http://localhost:8080 \
+                        --name \"${SECRET_NAME}\" \
+                        --namespace \"${NAMESPACE}\" \
+                        -f /tmp/unsealed-secret.yaml"
+
+          echo "Executing kubeseal command: ${KUBESEAL_CMD}"
+          eval "${KUBESEAL_CMD}" > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_debug.log
 
           # Check exit code and print logs if failed
           if [ $? -ne 0 ]; then
             echo "ERROR: kubeseal command failed with exit code $?."
-            # No need to cat kubeseal_debug.log here, as stderr is now direct
+            echo "--- kubeseal debug output ---"
+            cat /tmp/kubeseal_debug.log # Print the debug log
+            echo "-----------------------------"
             exit 1
           fi
+          # End kubeseal command execution section
 
           echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
 
