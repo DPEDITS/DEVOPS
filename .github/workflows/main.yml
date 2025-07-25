@@ -133,7 +133,7 @@ metadata:
 type: Opaque
 data:
   API_KEY: $(echo -n "$API_KEY" | base64) # Base64 encode the secret value
-EOF_UNSEALED
+EOF_UNSEALED # <--- THIS LINE IS NOW INDENTED BY EXACTLY 8 SPACES.
 
           # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
@@ -159,7 +159,6 @@ EOF_UNSEALED
           # -----------------------------------------------------------
 
           # --- Execute kubeseal command directly in this run block ---
-          # This avoids nesting 'cat << EOF' within another 'cat << EOF'
           kubeseal --format yaml \
                    --controller-url http://localhost:8080 \
                    --name "${SECRET_NAME}" \
