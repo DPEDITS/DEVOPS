@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: write # Needed to commit changes back to the repo
       id-token: write # Needed for OIDC authentication with AWS (for kubectl) - good practice
-    steps: # <--- All steps below this must be indented by 2 spaces
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Print received image tag
@@ -116,7 +116,7 @@ jobs:
           sudo install -m 755 kubeseal /usr/local/bin/kubeseal
           kubeseal --version
 
-      - name: Create and Seal Kubernetes Secret # <--- This step and its children were misindented
+      - name: Create and Seal Kubernetes Secret
         env:
           # This secret must be created in your GitHub repository secrets!
           API_KEY: ${{ secrets.VITE_APP_API_KEY_VALUE }}
@@ -137,23 +137,41 @@ jobs:
 
           # --- ADD THIS BLOCK: Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
-          # The controller is typically in kube-system namespace and named 'sealed-secrets-controller'
-          # It listens on port 8080
-          nohup kubectl port-forward service/sealed-secrets -n kube-system 8080:8080 > /dev/null 2>&1 &
-          # Give it a moment to establish the port-forward
-          sleep 10
-          echo "Port-forward initiated. Proceeding with sealing."
+          # The controller is typically in kube-system namespace and named 'sealed-secrets'
+          # It listens on port 8080. We run this in the background.
+          kubectl port-forward service/sealed-secrets -n kube-system 8080:8080 > /tmp/port-forward.log 2>&1 &
+          PORT_FORWARD_PID=$! # Capture the PID of the background process
+
+          # Wait for the port-forward to establish
+          echo "Waiting for port-forward to become active..."
+          timeout=60 # seconds
+          start_time=$(date +%s)
+          while ! nc -z localhost 8080 && [ $(($(date +%s) - start_time)) -lt $timeout ]; do
+            sleep 5
+            echo "Still waiting for port-forward..."
+          done
+
+          if ! nc -z localhost 8080; then
+            echo "ERROR: Port-forward failed to establish within $timeout seconds."
+            cat /tmp/port-forward.log # Output the port-forward logs for debugging
+            kill $PORT_FORWARD_PID || true # Attempt to kill if it's still running
+            exit 1
+          fi
+          echo "Port-forward established. Proceeding with sealing."
           # -----------------------------------------------------------
 
           # Seal the secret using kubeseal
-          # --controller-name and --controller-namespace are usually 'sealed-secrets' and 'kube-system'
-          # kubeseal will now connect to localhost:8080 which is forwarded to the controller
+          # IMPORTANT: Use --controller-url to point kubeseal to the local port-forward
           kubeseal --format yaml \
                    --controller-name sealed-secrets \
                    --controller-namespace kube-system \
+                   --controller-url http://localhost:8080 \
                    < /tmp/unsealed-secret.yaml > k8s/vite-app-sealed-secret.yaml
 
           echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
+
+          # Clean up the port-forward process
+          kill $PORT_FORWARD_PID || true
       # --- End Sealed Secrets Integration ---
 
       - name: Update deployment with new image tag
