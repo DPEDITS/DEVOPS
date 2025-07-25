@@ -25,7 +25,7 @@ jobs:
           echo "exclude:" >> .tfsec/config.yml
           echo "  - aws-eks-no-public-cluster-access" >> .tfsec/config.yml
           echo "  - aws-eks-no-public-cluster-access-to-cidr" >> .tfsec/config.yml
-          echo "  - aws-ec2-no-public-egress-sgr" >> .tfsec/config.yml
+          echo "  - - aws-ec2-no-public-egress-sgr" >> .tfsec/config.yml
       - name: Scan Terraform code with tfsec
         run: |
           TFSEC_VERSION=v1.28.14
@@ -127,16 +127,19 @@ jobs:
           SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
           NAMESPACE: default # Namespace where the secret will be deployed
         run: |
-          # Define the unsealed secret YAML as a shell variable
-          UNSEALED_SECRET_YAML="apiVersion: v1
+          # Define the unsealed secret YAML content using a here-document,
+          # then pipe it to kubeseal. This avoids complex YAML string escaping.
+          cat <<'EOF_UNSEALED_YAML_CONTENT' > /tmp/unsealed-secret.yaml
+apiVersion: v1
 kind: Secret
 metadata:
   name: ${SECRET_NAME}
   namespace: ${NAMESPACE}
 type: Opaque
 data:
-  API_KEY: $(echo -n \"$API_KEY\" | base64)
-"
+  API_KEY: $(echo -n "${API_KEY}" | base64)
+EOF_UNSEALED_YAML_CONTENT # <--- THIS MUST BE AT COLUMN 1
+
           # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
           kubectl port-forward service/sealed-secrets -n kube-system 8080:8080 > /tmp/port-forward.log 2>&1 &
@@ -161,11 +164,12 @@ data:
           # -----------------------------------------------------------
 
           # Execute kubeseal command using echo and pipe for robustness
-          echo "${UNSEALED_SECRET_YAML}" | \
+          # This avoids nesting 'cat << EOF' within another 'cat << EOF'
           kubeseal --format yaml \
                    --controller-url http://localhost:8080 \
                    --name "${SECRET_NAME}" \
                    --namespace "${NAMESPACE}" \
+                   < /tmp/unsealed-secret.yaml \
                    > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_error.log
 
           # Check exit code and print logs if failed
