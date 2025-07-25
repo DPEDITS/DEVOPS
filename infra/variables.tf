@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "cluster_name" {
   description = "Name of the EKS cluster"
   type        = string
-  default     = "vite-app-cluster"
+  default     = "vite-app-cluster-v2" # <--- Change this line
 }
 
 variable "ecr_repo_name" {

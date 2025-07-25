@@ -14,6 +14,13 @@ spec:
     spec:
       containers:
       - name: vite-app
-        image: 194644528937.dkr.ecr.us-east-1.amazonaws.com/my-vite-app:f55ace451c87aee65ecfba4ad6368ae9201e7230
+        # This image tag will be replaced by the GitHub Actions pipeline
+        image: 194644528937.dkr.ecr.us-east-1.amazonaws.com/my-vite-app:latest # Placeholder
         ports:
         - containerPort: 80
+        env: # Inject API_KEY from the Kubernetes Secret
+        - name: VITE_APP_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: vite-app-api-secret 
+              key: API_KEY           

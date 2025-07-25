@@ -6,7 +6,6 @@ spec:
   type: LoadBalancer
   selector:
     app: vite-app
-  
   ports:
     - protocol: TCP
       port: 80

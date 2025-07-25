@@ -1,8 +1,20 @@
 # Ignore everything in infra/
 infra/**
 
-
-# But don't ignore 
-
+# But don't ignore
 !infra/main.tf
 !infra/variables.tf
+
+# Node modules
+node_modules/
+
+# Vite build output
+app/dist/
+
+# Docker
+.dockerignore
+!Dockerfile
+
+# Kubernetes
+# The sealed secret file will be committed, so no need to ignore it
+# k8s/*.sealedsecret.yaml # If you wanted to ignore it
