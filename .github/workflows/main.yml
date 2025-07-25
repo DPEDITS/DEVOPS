@@ -127,19 +127,23 @@ jobs:
           SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
           NAMESPACE: default # Namespace where the secret will be deployed
         run: |
+          # Enable shell debugging and exit on error
+          set -xe
+
           # Base64 encode the API_KEY
           ENCODED_API_KEY=$(echo -n "${API_KEY}" | base64)
 
           # Define the unsealed secret YAML content by echoing line by line
           # This avoids here-document parsing issues in YAML.
-          echo "apiVersion: v1" > /tmp/unsealed-secret.yaml
-          echo "kind: Secret" >> /tmp/unsealed-secret.yaml
-          echo "metadata:" >> /tmp/unsealed-secret.yaml
-          echo "  name: ${SECRET_NAME}" >> /tmp/unsealed-secret.yaml
-          echo "  namespace: ${NAMESPACE}" >> /tmp/unsealed-secret.yaml
-          echo "type: Opaque" >> /tmp/unsealed-secret.yaml
-          echo "data:" >> /tmp/unsealed-secret.yaml
-          echo "  API_KEY: ${ENCODED_API_KEY}" >> /tmp/unsealed-secret.yaml
+          # Use printf for precise formatting and variable expansion.
+          printf "apiVersion: v1\n" > /tmp/unsealed-secret.yaml
+          printf "kind: Secret\n" >> /tmp/unsealed-secret.yaml
+          printf "metadata:\n" >> /tmp/unsealed-secret.yaml
+          printf "  name: %s\n" "${SECRET_NAME}" >> /tmp/unsealed-secret.yaml
+          printf "  namespace: %s\n" "${NAMESPACE}" >> /tmp/unsealed-secret.yaml
+          printf "type: Opaque\n" >> /tmp/unsealed-secret.yaml
+          printf "data:\n" >> /tmp/unsealed-secret.yaml
+          printf "  API_KEY: %s\n" "${ENCODED_API_KEY}" >> /tmp/unsealed-secret.yaml
 
           # --- Port-forward sealed-secrets-controller ---
           echo "Attempting to port-forward sealed-secrets controller..."
