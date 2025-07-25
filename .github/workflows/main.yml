@@ -181,7 +181,7 @@ jobs:
                    --controller-url http://localhost:8080 \
                    --name "${SECRET_NAME}" \
                    --namespace "${NAMESPACE}" \
-                   < /tmp/unsealed-secret.yaml \
+                   -f /tmp/unsealed-secret.yaml \ # <--- Explicitly use -f for input file
                    > k8s/vite-app-sealed-secret.yaml
 
           # Check exit code and print logs if failed
