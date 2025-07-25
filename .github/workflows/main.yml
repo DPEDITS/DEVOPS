@@ -158,14 +158,30 @@ jobs:
           echo "Port-forward established. Proceeding with sealing."
           # -----------------------------------------------------------
 
-          # Seal the secret using kubeseal
-          # IMPORTANT: Provide all necessary flags explicitly and on one line for robustness
-          # Added --name and --namespace flags explicitly, as they are often required/expected
-          kubeseal --format yaml \
-                   --controller-url http://localhost:8080 \
-                   --name "${SECRET_NAME}" \
-                   --namespace "${NAMESPACE}" \
-                   < /tmp/unsealed-secret.yaml > k8s/vite-app-sealed-secret.yaml
+          # --- NEW: Write kubeseal command to a script and execute it for robustness ---
+          cat << 'SEAL_SCRIPT_EOF' > /tmp/seal_secret.sh
+#!/bin/bash
+# Execute kubeseal with explicit arguments
+# Capture stderr and stdout for debugging
+kubeseal --format yaml \
+         --controller-url http://localhost:8080 \
+         --name "${SECRET_NAME}" \
+         --namespace "${NAMESPACE}" \
+         < /tmp/unsealed-secret.yaml \
+         > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_error.log
+
+# Check exit code and print logs if failed
+if [ $? -ne 0 ]; then
+  echo "ERROR: kubeseal command failed!"
+  echo "kubeseal stderr/stdout:"
+  cat /tmp/kubeseal_error.log
+  exit 1
+fi
+SEAL_SCRIPT_EOF
+
+          chmod +x /tmp/seal_secret.sh
+          /tmp/seal_secret.sh # Execute the script
+          # -----------------------------------------------------------------------------
 
           echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
 
