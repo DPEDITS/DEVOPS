@@ -25,7 +25,7 @@ jobs:
           echo "exclude:" >> .tfsec/config.yml
           echo "  - aws-eks-no-public-cluster-access" >> .tfsec/config.yml
           echo "  - aws-eks-no-public-cluster-access-to-cidr" >> .tfsec/config.yml
-          echo "  - - aws-ec2-no-public-egress-sgr" >> .tfsec/config.yml
+          echo "  - aws-ec2-no-public-egress-sgr" >> .tfsec/config.yml
       - name: Scan Terraform code with tfsec
         run: |
           TFSEC_VERSION=v1.28.14
@@ -127,8 +127,11 @@ jobs:
           SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
           NAMESPACE: default # Namespace where the secret will be deployed
         run: |
+          # Base64 encode the API_KEY first, before embedding it in the YAML string
+          ENCODED_API_KEY=$(echo -n "${API_KEY}" | base64)
+
           # Define the unsealed secret YAML content using a here-document,
-          # then pipe it to kubeseal. This avoids complex YAML string escaping.
+          # now with the pre-encoded API key
           cat <<'EOF_UNSEALED_YAML_CONTENT' > /tmp/unsealed-secret.yaml
 apiVersion: v1
 kind: Secret
@@ -137,7 +140,7 @@ metadata:
   namespace: ${NAMESPACE}
 type: Opaque
 data:
-  API_KEY: $(echo -n "${API_KEY}" | base64)
+  API_KEY: ${ENCODED_API_KEY} # Use the pre-encoded value here
 EOF_UNSEALED_YAML_CONTENT # <--- THIS MUST BE AT COLUMN 1
 
           # --- Port-forward sealed-secrets-controller ---
