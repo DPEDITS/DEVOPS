@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: write # Needed to commit changes back to the repo
       id-token: write # Needed for OIDC authentication with AWS (for kubectl) - good practice
-    steps:
+    steps: # <--- All steps below this must be indented by 2 spaces
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Print received image tag
@@ -105,7 +105,6 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
-      # --- FIX: Corrected kubeseal installation using curl and tar ---
       - name: Install kubeseal
         run: |
           KUBESEAL_VERSION="0.30.0" # Updated to the latest version
@@ -116,46 +115,46 @@ jobs:
           # Move and set permissions for the binary
           sudo install -m 755 kubeseal /usr/local/bin/kubeseal
           kubeseal --version
-      # -----------------------------------------------------------
 
-      - name: Create and Seal Kubernetes Secret
-    env:
-      # This secret must be created in your GitHub repository secrets!
-      API_KEY: ${{ secrets.VITE_APP_API_KEY_VALUE }}
-      SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
-      NAMESPACE: default # Namespace where the secret will be deployed
-    run: |
-      # Create a temporary unsealed secret YAML
-      cat <<EOF > /tmp/unsealed-secret.yaml
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: ${SECRET_NAME}
-        namespace: ${NAMESPACE}
-      type: Opaque
-      data:
-        API_KEY: $(echo -n "$API_KEY" | base64) # Base64 encode the secret value
-      EOF
+      - name: Create and Seal Kubernetes Secret # <--- This step and its children were misindented
+        env:
+          # This secret must be created in your GitHub repository secrets!
+          API_KEY: ${{ secrets.VITE_APP_API_KEY_VALUE }}
+          SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
+          NAMESPACE: default # Namespace where the secret will be deployed
+        run: |
+          # Create a temporary unsealed secret YAML
+          cat <<EOF > /tmp/unsealed-secret.yaml
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ${SECRET_NAME}
+            namespace: ${NAMESPACE}
+          type: Opaque
+          data:
+            API_KEY: $(echo -n "$API_KEY" | base64) # Base64 encode the secret value
+          EOF
 
-      # --- ADD THIS BLOCK: Port-forward sealed-secrets-controller ---
-      echo "Attempting to port-forward sealed-secrets controller..."
-      # The controller is typically in kube-system namespace and named 'sealed-secrets-controller'
-      # It listens on port 8080
-      nohup kubectl port-forward service/sealed-secrets -n kube-system 8080:8080 > /dev/null 2>&1 &
-      # Give it a moment to establish the port-forward
-      sleep 10
-      echo "Port-forward initiated. Proceeding with sealing."
-      # -----------------------------------------------------------
+          # --- ADD THIS BLOCK: Port-forward sealed-secrets-controller ---
+          echo "Attempting to port-forward sealed-secrets controller..."
+          # The controller is typically in kube-system namespace and named 'sealed-secrets-controller'
+          # It listens on port 8080
+          nohup kubectl port-forward service/sealed-secrets -n kube-system 8080:8080 > /dev/null 2>&1 &
+          # Give it a moment to establish the port-forward
+          sleep 10
+          echo "Port-forward initiated. Proceeding with sealing."
+          # -----------------------------------------------------------
 
-      # Seal the secret using kubeseal
-      # --controller-name and --controller-namespace are usually 'sealed-secrets' and 'kube-system'
-      # kubeseal will now connect to localhost:8080 which is forwarded to the controller
-      kubeseal --format yaml \
-               --controller-name sealed-secrets \
-               --controller-namespace kube-system \
-               < /tmp/unsealed-secret.yaml > k8s/vite-app-sealed-secret.yaml
+          # Seal the secret using kubeseal
+          # --controller-name and --controller-namespace are usually 'sealed-secrets' and 'kube-system'
+          # kubeseal will now connect to localhost:8080 which is forwarded to the controller
+          kubeseal --format yaml \
+                   --controller-name sealed-secrets \
+                   --controller-namespace kube-system \
+                   < /tmp/unsealed-secret.yaml > k8s/vite-app-sealed-secret.yaml
 
-      echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
+          echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
+      # --- End Sealed Secrets Integration ---
 
       - name: Update deployment with new image tag
         run: |
