@@ -127,9 +127,6 @@ jobs:
           SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
           NAMESPACE: default # Namespace where the secret will be deployed
         run: |
-          # Enable shell debugging and exit on error
-          set -xe
-
           # Base64 encode the API_KEY
           ENCODED_API_KEY=$(echo -n "${API_KEY}" | base64)
 
