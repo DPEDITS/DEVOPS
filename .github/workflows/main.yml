@@ -4,17 +4,16 @@ on:
   push:
     branches: [ main ]
     # paths-ignore:
-    #   - 'k8s/**'
+    #   - 'k8s/**' # This line is commented out, meaning changes in k8s/ will trigger the workflow
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: my-vite-app
-  EKS_CLUSTER_NAME: vite-app-cluster
+  EKS_CLUSTER_NAME: vite-app-cluster-v2 # Corrected cluster name
 
 jobs:
-  # ... (security-scans job remains the same)
   security-scans:
-    name: Security Scanning 
+    name: Security Scanning
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -34,7 +33,7 @@ jobs:
           chmod +x tfsec
           sudo mv tfsec /usr/local/bin/tfsec
           tfsec --soft-fail ./infra
-      - name: Build Docker image 
+      - name: Build Docker image
         run: docker build -t temp-image-for-scan .
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@0.20.0
@@ -44,7 +43,7 @@ jobs:
           severity: 'HIGH,CRITICAL'
 
   build-and-push:
-    name: Build & Push to ECR 
+    name: Build & Push to ECR
     runs-on: ubuntu-latest
     needs: security-scans
     permissions:
@@ -75,24 +74,140 @@ jobs:
           echo "The image tag being set is: $IMAGE_TAG"
 
   update-manifest:
-    name: Update K8s Manifest 
+    name: Update K8s Manifest & Seal Secrets
     runs-on: ubuntu-latest
     needs: build-and-push
     permissions:
-      contents: write
+      contents: write # Needed to commit changes back to the repo
+      id-token: write # Needed for OIDC authentication with AWS (for kubectl) - good practice
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Print received image tag
         run: |
           echo "Received image tag from previous job: ${{ needs.build-and-push.outputs.image_tag }}"
+
+      # --- Start Sealed Secrets Integration ---
+      # Configure AWS Credentials for kubectl
+      - name: Configure AWS Credentials for Kubectl
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          # role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-eks-role
+          # role-session-name: github-actions-session
+
+      # Install kubectl
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      # Update kubeconfig to connect to the EKS cluster
+      - name: Update Kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      # Install kubeseal client-side tool
+      - name: Install kubeseal
+        run: |
+          KUBESEAL_VERSION="0.30.0" # Using the latest stable version
+          # Download the tar.gz archive
+          curl -OL "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
+          # Extract the kubeseal binary
+          tar -xvzf kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz kubeseal
+          # Move and set permissions for the binary
+          sudo install -m 755 kubeseal /usr/local/bin/kubeseal
+          kubeseal --version
+
+      # Create and Seal Kubernetes Secret
+      - name: Create and Seal Kubernetes Secret
+        env:
+          # This secret must be created in your GitHub repository secrets!
+          API_KEY: ${{ secrets.VITE_APP_API_KEY_VALUE }}
+          SECRET_NAME: vite-app-api-secret # Name of the Kubernetes Secret
+          NAMESPACE: default # Namespace where the secret will be deployed
+        run: |
+          # Enable shell debugging and exit on error
+          set -xe
+
+          # Base64 encode the API_KEY
+          ENCODED_API_KEY=$(echo -n "${API_KEY}" | base64)
+
+          # Define the unsealed secret YAML content by echoing line by line
+          # This avoids here-document parsing issues in YAML.
+          # Use printf for precise formatting and variable expansion.
+          printf "apiVersion: v1\n" > /tmp/unsealed-secret.yaml
+          printf "kind: Secret\n" >> /tmp/unsealed-secret.yaml
+          printf "metadata:\n" >> /tmp/unsealed-secret.yaml
+          printf "  name: %s\n" "${SECRET_NAME}" >> /tmp/unsealed-secret.yaml
+          printf "  namespace: %s\n" "${NAMESPACE}" >> /tmp/unsealed-secret.yaml
+          printf "type: Opaque\n" >> /tmp/unsealed-secret.yaml
+          printf "data:\n" >> /tmp/unsealed-secret.yaml
+          printf "  API_KEY: %s\n" "${ENCODED_API_KEY}" >> /tmp/unsealed-secret.yaml
+
+          # --- Port-forward sealed-secrets-controller ---
+          echo "Attempting to port-forward sealed-secrets controller..."
+          # Get service details for debugging
+          kubectl get service sealed-secrets -n kube-system -o yaml || true
+          kubectl describe service sealed-secrets -n kube-system || true
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets -o wide || true
+          kubectl describe pod $(kubectl get pods -n kube-system -l app.kubernetes.io/name=sealed-secrets -o jsonpath='{.items[0].metadata.name}') -n kube-system || true
+
+          kubectl port-forward service/sealed-secrets -n kube-system 8080:8080 > /tmp/port-forward.log 2>&1 &
+          PORT_FORWARD_PID=$! # Capture the PID of the background process
+
+          # Wait for the port-forward to establish
+          echo "Waiting for port-forward to become active..."
+          timeout=60 # seconds
+          start_time=$(date +%s)
+          while ! nc -z localhost 8080 && [ $(($(date +%s) - start_time)) -lt $timeout ]; do
+            sleep 5
+            echo "Still waiting for port-forward..."
+          done
+
+          if ! nc -z localhost 8080; then
+            echo "ERROR: Port-forward failed to establish within $timeout seconds."
+            cat /tmp/port-forward.log # Output the port-forward logs for debugging
+            kill $PORT_FORWARD_PID || true # Attempt to kill if it's still running
+            exit 1
+          fi
+          echo "Port-forward established. Proceeding with sealing."
+          # End Port-forward sealed-secrets-controller section
+
+          # Execute kubeseal command using the temporary file
+          # Add -v (verbose) flag and redirect all output to a log file for debugging
+          # Direct stderr to console output for immediate visibility
+          kubeseal -v --format yaml \
+                   --controller-url http://localhost:8080 \
+                   --name "${SECRET_NAME}" \
+                   --namespace "${NAMESPACE}" \
+                   -f /tmp/unsealed-secret.yaml \
+                   > k8s/vite-app-sealed-secret.yaml 2> /tmp/kubeseal_debug.log
+
+          # Check exit code and print logs if failed
+          if [ $? -ne 0 ]; then
+            echo "ERROR: kubeseal command failed with exit code $?."
+            echo "--- kubeseal debug output ---"
+            cat /tmp/kubeseal_debug.log # Print the debug log
+            echo "-----------------------------"
+            exit 1
+          fi
+
+          echo "Sealed secret generated at k8s/vite-app-sealed-secret.yaml"
+
+          # Clean up the port-forward process
+          kill $PORT_FORWARD_PID || true
+      # End Sealed Secrets Integration
+
       - name: Update deployment with new image tag
         run: |
+          # Ensure you have AWS_ACCOUNT_ID as a GitHub Secret for this line
           sed -i "s|image: .*/${{ env.ECR_REPOSITORY }}:.*|image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image_tag }}|" k8s/deployment.yaml
+
       - name: Commit and push changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add k8s/deployment.yaml
-          git commit -m "Updated image tag to ${{ needs.build-and-push.outputs.image_tag }}"
+          git add k8s/deployment.yaml k8s/vite-app-sealed-secret.yaml # Add the new sealed secret file
+          git commit -m "Updated image tag to ${{ needs.build-and-push.outputs.image_tag }} and sealed secrets" || echo "No changes to commit"
           git push
