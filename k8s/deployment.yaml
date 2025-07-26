@@ -15,6 +15,6 @@ spec:
       containers:
       - name: vite-app
         # This image tag will be replaced by the GitHub Actions pipeline
-        image: 194644528937.dkr.ecr.us-east-1.amazonaws.com/my-vite-app:a27597579c146cd79a9963815fdca61f3e3cd836
+        image: 194644528937.dkr.ecr.us-east-1.amazonaws.com/my-vite-app:eeb169cae44623f8c56a794116d51a90cebee5ab
         ports:
         - containerPort: 80  
