@@ -28,128 +28,76 @@ provider "kubernetes" {
 
 data "aws_availability_zones" "available" {}
 
-# VPC module
+resource "aws_ecr_repository" "app_repo" {
+  name = var.ecr_repo_name
+
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  force_delete = true
+}
+
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.9.0"
 
-  name = "vite-app-vpc"
+  name = "eks-vpc"
   cidr = "10.0.0.0/16"
   azs  = slice(data.aws_availability_zones.available.names, 0, 3)
 
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
   public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 
-  enable_nat_gateway           = true
-  single_nat_gateway           = true
-  enable_dns_hostnames         = true
-  enable_flow_log              = true
+  enable_nat_gateway   = true
+  single_nat_gateway   = true
+  enable_dns_hostnames = true
+  enable_flow_log      = true
 
   create_flow_log_cloudwatch_log_group = true
   create_flow_log_cloudwatch_iam_role  = true
-
-  tags = {
-    Name = "vite-app-vpc"
-  }
-}
-
-# KMS Key and Alias
-resource "aws_kms_key" "eks_key" {
-  description             = "KMS key for EKS"
-  deletion_window_in_days = 10
-  enable_key_rotation     = true
-
-  tags = {
-    Environment = "dev"
-  }
-}
-
-resource "aws_kms_alias" "eks_alias" {
-  name            = "alias/eks/vite-app-cluster-v2" # <--- Changed name here
-  target_key_id   = aws_kms_key.eks_key.id
-
-  lifecycle {
-    prevent_destroy = false
-    ignore_changes  = [name]
-  }
-}
-
-# ECR Repository
-resource "aws_ecr_repository" "app_repo" {
-  name = var.ecr_repo_name # Use variable here
-
-  lifecycle {
-    ignore_changes  = [name]
-    prevent_destroy = false
-  }
-
-  tags = {
-    Name = var.ecr_repo_name
-  }
 }
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "19.15.3"
+  version = "20.17.2"
 
   cluster_name    = var.cluster_name
-  cluster_version = "1.27"
-  subnet_ids      = module.vpc.private_subnets
+  cluster_version = "1.30"
   vpc_id          = module.vpc.vpc_id
+  subnet_ids      = module.vpc.private_subnets
 
-  enable_irsa = true
+  cluster_endpoint_private_access        = true
+  cluster_endpoint_public_access         = true
+  cluster_endpoint_public_access_cidrs   = ["0.0.0.0/0"]
+  cluster_enabled_log_types              = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
-  # --- Corrected EKS Cluster Endpoint Access Configuration for v19.x.x ---
-  cluster_endpoint_private_access = false # Set to false if you only want public access from outside VPC
-  cluster_endpoint_public_access  = true
-  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"] # Allow access from anywhere (for testing)
-                                                      # In production, restrict this to your office/home IP range
-  # ---------------------------------------------------------------------
-
-  eks_managed_node_groups = {
-    one = {
-      desired_size = 2
-      max_size     = 3
-      min_size     = 1
-
-      instance_types = ["t3.medium"]
+  access_entries = {
+    ClusterAdmin = {
+      principal_arn = "arn:aws:iam::194644528937:user/Dev"
+      policy_associations = {
+        Admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
     }
   }
 
-  tags = {
-    Environment = "dev"
-    Terraform   = "true"
-  }
-}
-# Wait for EKS to be Ready
-resource "null_resource" "wait_for_eks_ready" {
-  depends_on = [module.eks]
-
-  provisioner "local-exec" {
-    command = <<EOT
-      echo "Waiting for EKS API endpoint DNS to be resolvable..."
-      aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}
-      for i in {1..20}; do
-        if kubectl version --output=yaml; then
-          echo "Kubernetes API is accessible."
-          exit 0
-        fi
-        echo "Waiting for Kubernetes API... retrying in 15 seconds"
-        sleep 15
-      done
-
-      echo "ERROR: EKS endpoint not resolvable after retries. Exiting."
-      exit 1
-    EOT
-    interpreter = ["bash", "-c"]
-  }
-
-  triggers = {
-    endpoint = module.eks.cluster_endpoint
+  eks_managed_node_groups = {
+    one = {
+      min_size      = 1
+      max_size      = 2
+      desired_size  = 1
+      instance_types = ["t3.medium"]
+    }
   }
 }
 
-# Install ArgoCD
 resource "null_resource" "argocd_install" {
   depends_on = [null_resource.wait_for_eks_ready]
 
@@ -171,40 +119,42 @@ resource "null_resource" "argocd_install" {
   }
 
   triggers = {
-    always_run = timestamp()
+    always_run = timestamp() 
   }
 }
 
-# Install Sealed Secrets Controller
-resource "null_resource" "sealed_secrets_install" {
-  depends_on = [null_resource.wait_for_eks_ready] # Ensure EKS is ready
+resource "null_resource" "wait_for_eks_ready" {
+  depends_on = [module.eks]
 
   provisioner "local-exec" {
     command = <<EOT
-      echo "Installing Sealed Secrets Controller..."
+      echo "Waiting for EKS API endpoint DNS to be resolvable..."
+
       aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}
-      for i in 1 2 3; do
-        helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets && \
-        helm repo update && \
-        helm install sealed-secrets sealed-secrets/sealed-secrets --namespace kube-system --create-namespace --version 2.15.0 --wait && \
-        break
-        echo "Sealed Secrets Helm install failed. Retrying in 15 seconds..."
+      for i in {1..20}; do
+        if kubectl version --output=yaml; then
+          echo "Kubernetes API is accessible."
+          exit 0
+        fi
+        echo "Waiting for Kubernetes API... retrying in 15 seconds"
         sleep 15
       done
-      echo "Sealed Secrets Controller installed."
+
+
+      echo "ERROR: EKS endpoint not resolvable after retries. Exiting."
+      exit 1
     EOT
     interpreter = ["bash", "-c"]
   }
 
   triggers = {
-    always_run = timestamp()
+    endpoint = module.eks.cluster_endpoint
   }
 }
 
 
-# Deploy ArgoCD Application
 resource "null_resource" "argocd_app_deploy" {
-  depends_on = [null_resource.argocd_install, null_resource.sealed_secrets_install] # Depend on both ArgoCD and Sealed Secrets
+  depends_on = [null_resource.wait_for_eks_ready, null_resource.argocd_install]
 
   provisioner "local-exec" {
     command = <<EOT
@@ -215,7 +165,7 @@ resource "null_resource" "argocd_app_deploy" {
       fi
 
       for i in 1 2 3; do
-        kubectl apply -f ../k8s/argocd-app.yaml --validate=false && break
+        kubectl apply -f ../argocd-app.yaml --validate=false && break
         echo "kubectl apply failed. Retrying in 15 seconds..."
         sleep 15
       done
@@ -228,7 +178,7 @@ resource "null_resource" "argocd_app_deploy" {
   }
 }
 
-# Port Forward ArgoCD UI
+
 resource "null_resource" "argocd_port_forward" {
   depends_on = [null_resource.argocd_install]
 
@@ -246,9 +196,10 @@ resource "null_resource" "argocd_port_forward" {
   }
 }
 
-# Cleanup Resources on Destroy
 resource "null_resource" "k8s_cleanup" {
-  depends_on = [null_resource.argocd_app_deploy]
+  depends_on = [
+    null_resource.argocd_app_deploy
+  ]
 
   provisioner "local-exec" {
     when    = destroy
@@ -256,7 +207,7 @@ resource "null_resource" "k8s_cleanup" {
       echo "--- Aggressive Cleanup Initiated ---"
 
       echo "Deleting Argo CD Application dynamically..."
-      APP_NAME=$(kubectl get applications.argoproj.io -n argocd -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      APP_NAME=$(kubectl get applications.argoproj.io -n argocd -o jsonpath='{.items[0].metadata.name}')
       if [ -n "$APP_NAME" ]; then
         kubectl delete application "$APP_NAME" -n argocd --ignore-not-found --validate=false
       fi
@@ -265,15 +216,9 @@ resource "null_resource" "k8s_cleanup" {
       helm ls -n argocd | awk 'NR>1 {print $1}' | xargs -r -n1 helm uninstall -n argocd || true
       kubectl delete namespace argocd --ignore-not-found
 
-      echo "Uninstalling Sealed Secrets Helm release dynamically..."
-      helm ls -n kube-system | grep sealed-secrets | awk 'NR>0 {print $1}' | xargs -r -n1 helm uninstall -n kube-system || true
-      # Note: The sealed-secrets controller does not create its own namespace, it typically uses kube-system.
-      # So no specific namespace deletion for it.
-
       echo "Deleting all Services and Deployments in default namespace..."
       kubectl delete service --all -n default --ignore-not-found
       kubectl delete deployment --all -n default --ignore-not-found
-      kubectl delete secret vite-app-api-secret -n default --ignore-not-found # Clean up the actual secret
 
       echo "Deleting Classic Load Balancers..."
       for lb in $(aws elb describe-load-balancers --query 'LoadBalancerDescriptions[*].LoadBalancerName' --output text); do
