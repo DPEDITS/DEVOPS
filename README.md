@@ -95,7 +95,7 @@ Make sure you have these installed locally:
     cd .. # Go back to repo root
     ```
 3.  **Verify `k8s/argocd-app.yaml`**:
-    Open it and ensure `repoURL` points to `https://github.com/DPEDITS/DEVOPS.git` (your actual repo).
+    Open it and ensure `repoURL` points to `https://github.com/DPEDITS/DEVSECOPS.git` (your actual repo).
 
 ### 🚀 Deployment Steps
 
